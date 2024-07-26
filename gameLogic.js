@@ -5,7 +5,7 @@ class GameLogic {
         this.towers = [];
         this.enemies = [];
         this.bullets = [];
-        this.currentPath = [];
+        this.currentPath = this.generatePath();
     }
 
     update() {
