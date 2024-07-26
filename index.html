@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tower Defense Castle</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #gameContainer {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        #gameBoard {
+            box-sizing: border-box;
+            width: 100%;
+            height: auto;
+            max-width: 500px;
+            max-height: 400px;
+            display: block;
+            margin: 0 auto;
+            border: 2px solid #333;
+            background-color: #fff;
+        }
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+        button {
+            padding: 5px 10px;
+            margin: 5px;
+            font-size: 14px;
+        }
+        #towerButtons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        #gameInfo {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        #gameInfo span {
+            margin: 0 10px;
+        }
+        #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+        }
+        #retryButton {
+            font-size: 18px;
+            margin-top: 20px;
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+        #towerButtons {
+            margin-top: 10px;
+        }
+        @media (max-width: 600px) {
+            button {
+                font-size: 12px;
+                padding: 4px 8px;
+            }
+            #gameInfo span {
+                font-size: 12px;
+                margin: 0 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameBoard"></canvas>
+        <div id="controls">
+            <button id="startWave">Start Wave</button>
+            <button id="pauseBtn">Pause</button>
+            <div id="gameInfo">
+                <span id="money">Money: $50</span>
+                <span id="castleHealth">Castle Health: 100</span>
+                <span id="waveNumber">Wave: 1</span>
+                <span id="points">Points: 0</span>
+            </div>
+            <div id="towerButtons">
+                <button id="basicTower">Basic Tower ($20)</button>
+                <button id="sniperTower" disabled>Sniper Tower ($30)</button>
+                <button id="rapidTower" disabled>Rapid Tower ($40)</button>
+            </div>
+        </div>
+        <div id="gameOverScreen">
+            <h2>Game Over</h2>
+            <p>The castle has been destroyed!</p>
+            <button id="retryButton">Retry</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameBoard');
+        const ctx = canvas.getContext('2d');
+        const startWaveBtn = document.getElementById('startWave');
+        const basicTowerBtn = document.getElementById('basicTower');
+        const sniperTowerBtn = document.getElementById('sniperTower');
+        const rapidTowerBtn = document.getElementById('rapidTower');
+        const moneySpan = document.getElementById('money');
+        const castleHealthSpan = document.getElementById('castleHealth');
+        const waveNumberSpan = document.getElementById('waveNumber');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const retryButton = document.getElementById('retryButton');
+        const togglePauseBtn = document.getElementById('pauseBtn');
+
+        let money, towers, enemies, bullets, waveInProgress, castle, gameOver, currentWave, currentPath, selectedTowerType;
+        let isFirstWave = true;  // Add this new variable
+        let isPaused = false;
+        let points = 0;
+        let ghostTower = null;
+        let mouseX = 0;
+        let mouseY = 0;
+        let canvasScale = 1;
+
+        const towerTypes = {
+            basic: { color: 'blue', range: 100, damage: 20, fireRate: 30, cost: 20 },
+            sniper: { color: 'purple', range: 200, damage: 50, fireRate: 60, cost: 30 },
+            rapid: { color: 'orange', range: 75, damage: 10, fireRate: 15, cost: 40 }
+        };
+
+        const paths = [
+            [
+                {x: 0, y: 200},
+                {x: 200, y: 200},
+                {x: 200, y: 100},
+                {x: 400, y: 100},
+                {x: 400, y: 200},
+                {x: 500, y: 200}
+            ],
+            [
+                {x: 0, y: 100},
+                {x: 100, y: 100},
+                {x: 100, y: 300},
+                {x: 300, y: 300},
+                {x: 300, y: 200},
+                {x: 500, y: 200}
+            ],
+            [
+                {x: 0, y: 300},
+                {x: 250, y: 300},
+                {x: 250, y: 100},
+                {x: 500, y: 100}
+            ]
+        ];
+
+        function resizeCanvas() {
+            const containerWidth = document.getElementById('gameContainer').offsetWidth;
+            const scale = containerWidth / 500;
+
+            canvas.style.width = `${containerWidth}px`;
+            canvas.style.height = `${containerWidth * 0.8}px`; // Maintain 5:4 aspect ratio
+            
+            canvas.width = containerWidth;
+            canvas.height = containerWidth * 0.8;
+
+            ctx.setTransform(scale, 0, 0, scale, 0, 0);
+            canvasScale = scale;
+            console.log(`Canvas resized: canvas.width=${canvas.width}, canvas.height=${canvas.height}, scale=${scale}`);
+            redrawGame();
+        }
+
+        function redrawGame() {
+            ctx.clearRect(0, 0, canvas.width / canvasScale, canvas.height / canvasScale);
+            drawPath(currentPath);
+            drawCastle();
+            towers.forEach(drawTower);
+            enemies.forEach(drawEnemy);
+            bullets.forEach(drawBullet);
+            drawGhostTower();
+        }
+
+        window.addEventListener('resize', () => {
+            console.log('Resize event triggered');
+            resizeCanvas();
+            console.log('Rendered size:', canvas.offsetWidth, 'x', canvas.offsetHeight);
+            redrawGame();
+        });
+
+        function handlePointerMove(x, y) {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (x - rect.left) / (rect.width / canvas.width);
+            mouseY = (y - rect.top) / (rect.height / canvas.height);
+
+            // Update ghost tower position
+            if (ghostTower) {
+                ghostTower.x = mouseX;
+                ghostTower.y = mouseY;
+            }
+
+            console.log(`Pointer move: mouseX=${mouseX}, mouseY=${mouseY}, canvas.width=${canvas.width}, canvas.height=${canvas.height}`);
+        }
+
+        function handlePointerClick(x, y) {
+            if (!gameOver && !isPaused && selectedTowerType && money >= towerTypes[selectedTowerType].cost) {
+                const rect = canvas.getBoundingClientRect();
+                const clickX = (x - rect.left) / (rect.width / canvas.width);
+                const clickY = (y - rect.top) / (rect.height / canvas.height);
+                if (clickX < castle.x - 30 && !isOnPath(clickX, clickY)) {
+                    const newTower = {
+                        x: clickX,
+                        y: clickY,
+                        health: 100,
+                        cooldown: 0,
+                        ...towerTypes[selectedTowerType]
+                    };
+                    towers.push(newTower);
+                    updateMoney(-newTower.cost);
+                    selectedTowerType = null;
+                    ghostTower = null;
+                }
+            }
+        }
+
+        function initGame() {
+            money = 50;
+            towers = [];
+            enemies = [];
+            bullets = [];
+            waveInProgress = false;
+            gameOver = false;
+            currentWave = 1;
+            isFirstWave = true;
+            currentPath = getRandomPath();
+            castle = {
+                x: currentPath[currentPath.length - 1].x,
+                y: currentPath[currentPath.length - 1].y,
+                health: 100
+            };
+            selectedTowerType = null;
+            points = 0;
+            isPaused = false;
+            updatePointsDisplay();
+            updateMoney(0);
+            updateCastleHealth(0);
+            updateWaveNumber();
+            updateTowerButtons();
+        }
+
+        function drawCanvasBorder() {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function drawGhostTower() {
+            if (ghostTower) {
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = towerTypes[selectedTowerType].color;
+                ctx.fillRect(ghostTower.x - 10, ghostTower.y - 10, 20, 20);
+                
+                // Draw range circle
+                ctx.beginPath();
+                ctx.arc(ghostTower.x, ghostTower.y, towerTypes[selectedTowerType].range, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+                ctx.stroke();
+                
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function updateMoney(amount) {
+            money += amount;
+            moneySpan.textContent = `Money: $${money}`;
+            updateTowerButtons();
+        }
+
+        function updateCastlePosition() {
+            const lastPoint = currentPath[currentPath.length - 1];
+            castle.x = lastPoint.x;
+            castle.y = lastPoint.y;
+        }
+
+        function updateCastleHealth(amount) {
+            castle.health += amount;
+            castleHealthSpan.textContent = `Castle Health: ${castle.health}`;
+            if (castle.health <= 0) {
+                endGame();
+            }
+        }
+
+        function updateWaveNumber() {
+            waveNumberSpan.textContent = `Wave: ${currentWave}`;
+            updateTowerButtons();
+        }
+
+        function updateTowerButtons() {
+            basicTowerBtn.disabled = money < towerTypes.basic.cost;
+            sniperTowerBtn.disabled = currentWave < 3 || money < towerTypes.sniper.cost;
+            rapidTowerBtn.disabled = currentWave < 5 || money < towerTypes.rapid.cost;
+        }
+
+        function endGame() {
+            gameOver = true;
+            gameOverScreen.style.display = 'flex';
+        }
+
+        function restartGame() {
+            initGame();
+            gameOverScreen.style.display = 'none';
+            gameLoop();
+        }
+
+        function getRandomPath() {
+            return paths[Math.floor(Math.random() * paths.length)];
+        }
+
+        function drawPath(path) {
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 20;
+            ctx.beginPath();
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x, path[i].y);
+            }
+            ctx.stroke();
+        }
+
+        function drawCastle() {
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(castle.x - 25, castle.y - 50, 50, 100);
+            ctx.fillStyle = 'brown';
+            ctx.fillRect(castle.x - 15, castle.y + 10, 30, 40);
+            
+            // Draw castle health bar
+            ctx.fillStyle = 'red';
+            ctx.fillRect(castle.x - 25, castle.y - 60, 50, 5);
+            ctx.fillStyle = 'green';
+            ctx.fillRect(castle.x - 25, castle.y - 60, (castle.health / 100) * 50, 5);
+        }
+
+        function drawTower(tower) {
+            ctx.fillStyle = tower.color;
+            ctx.fillRect(tower.x - 10, tower.y - 10, 20, 20);
+            
+            // Draw range circle
+            ctx.beginPath();
+            ctx.arc(tower.x, tower.y, tower.range, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.stroke();
+
+            // Draw health bar
+            ctx.fillStyle = 'red';
+            ctx.fillRect(tower.x - 15, tower.y - 20, 30, 5);
+            ctx.fillStyle = 'green';
+            ctx.fillRect(tower.x - 15, tower.y - 20, (tower.health / 100) * 30, 5);
+        }
+
+        function drawEnemy(enemy) {
+            ctx.fillStyle = enemy.color;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw health bar
+            ctx.fillStyle = 'red';
+            ctx.fillRect(enemy.x - 15, enemy.y - 15 - enemy.size, 30, 5);
+            ctx.fillStyle = 'green';
+            ctx.fillRect(enemy.x - 15, enemy.y - 15 - enemy.size, (enemy.health / enemy.maxHealth) * 30, 5);
+        }
+
+        function drawBullet(bullet) {
+            ctx.fillStyle = 'yellow';
+            ctx.beginPath();
+            ctx.arc(bullet.x, bullet.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function spawnEnemy() {
+            const startPoint = currentPath[0];
+            const health = 100 + (currentWave - 1) * 20;
+            const speed = 0.5 + (currentWave - 1) * 0.1;
+            const size = 5 + Math.min(5, currentWave - 1);
+            const color = currentWave % 2 === 0 ? 'darkred' : 'red';
+            enemies.push({
+                x: startPoint.x,
+                y: startPoint.y,
+                health: health,
+                maxHealth: health,
+                speed: speed,
+                pathIndex: 0,
+                size: size,
+                color: color
+            });
+        }
+
+        function moveEnemy(enemy) {
+            const targetPoint = currentPath[enemy.pathIndex + 1];
+            if (!targetPoint) return true; // Reached the end of the path
+
+            const dx = targetPoint.x - enemy.x;
+            const dy = targetPoint.y - enemy.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < enemy.speed) {
+                enemy.pathIndex++;
+                if (enemy.pathIndex === currentPath.length - 1) {
+                    return true; // Reached the castle
+                }
+            } else {
+                enemy.x += (dx / distance) * enemy.speed;
+                enemy.y += (dy / distance) * enemy.speed;
+            }
+
+            return false;
+        }
+
+        function countdown(seconds, onComplete) {
+            let remainingSeconds = seconds;
+            const countdownInterval = setInterval(() => {
+                if (remainingSeconds > 0) {
+                    ctx.fillStyle = 'black';
+                    ctx.font = '48px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(remainingSeconds, canvas.width / 2, canvas.height / 2);
+                    remainingSeconds--;
+                } else {
+                    clearInterval(countdownInterval);
+                    onComplete();
+                }
+            }, 1000);
+        }
+
+        function removeTowers() {
+            towers = [];
+            updateMoney(0); // Trigger UI update
+        }
+
+        function updatePointsDisplay() {
+            document.getElementById('points').textContent = `Points: ${points}`;
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            togglePauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+
+            if (isPaused) {
+                cancelAnimationFrame(animationFrameId);
+            } else {
+                gameLoop();
+            }
+        }
+
+        function isOnPath(x, y) {
+            const pathWidth = 20; // Adjust based on your path width
+            return currentPath.some((point, index) => {
+                if (index === currentPath.length - 1) return false;
+                const nextPoint = currentPath[index + 1];
+                const distToSegment = distanceToLineSegment(x, y, point.x, point.y, nextPoint.x, nextPoint.y);
+                return distToSegment < pathWidth;
+            });
+        }
+
+        function distanceToLineSegment(x, y, x1, y1, x2, y2) {
+            const A = x - x1;
+            const B = y - y1;
+            const C = x2 - x1;
+            const D = y2 - y1;
+
+            const dot = A * C + B * D;
+            const len_sq = C * C + D * D;
+            let param = -1;
+            if (len_sq != 0) param = dot / len_sq;
+
+            let xx, yy;
+
+            if (param < 0) {
+                xx = x1;
+                yy = y1;
+            }
+            else if (param > 1) {
+                xx = x2;
+                yy = y2;
+            }
+            else {
+                xx = x1 + param * C;
+                yy = y1 + param * D;
+            }
+
+            const dx = x - xx;
+            const dy = y - yy;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function gameLoop() {
+            if (gameOver || isPaused) return;
+
+            ctx.clearRect(0, 0, canvas.width / canvasScale, canvas.height / canvasScale);
+
+            drawPath(currentPath);
+            drawCastle();
+            drawGhostTower();
+
+            // Update and draw towers
+            towers.forEach(tower => {
+                drawTower(tower);
+                if (enemies.length > 0 && tower.cooldown <= 0) {
+                    let closestEnemy = enemies.reduce((closest, enemy) => {
+                        const distance = Math.sqrt(Math.pow(enemy.x - tower.x, 2) + Math.pow(enemy.y - tower.y, 2));
+                        return (distance < closest.distance && distance <= tower.range) ? { enemy, distance } : closest;
+                    }, { distance: Infinity }).enemy;
+
+                    if (closestEnemy) {
+                        bullets.push({
+                            x: tower.x,
+                            y: tower.y,
+                            targetX: closestEnemy.x,
+                            targetY: closestEnemy.y,
+                            speed: 5,
+                            damage: tower.damage
+                        });
+                        tower.cooldown = tower.fireRate;
+                    }
+                }
+                if (tower.cooldown > 0) tower.cooldown--;
+            });
+
+            // Update and draw bullets
+            bullets = bullets.filter(bullet => {
+                drawBullet(bullet);
+                let dx = bullet.targetX - bullet.x;
+                let dy = bullet.targetY - bullet.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > bullet.speed) {
+                    bullet.x += (dx / distance) * bullet.speed;
+                    bullet.y += (dy / distance) * bullet.speed;
+                    return true;
+                } else {
+                    // Check for collision with enemies
+                    let hitEnemy = enemies.find(enemy =>
+                        Math.abs(enemy.x - bullet.x) < enemy.size && Math.abs(enemy.y - bullet.y) < enemy.size
+                    );
+                    if (hitEnemy) {
+                        hitEnemy.health -= bullet.damage;
+                    }
+                    return false;
+                }
+            });
+
+            // Update and draw enemies
+            enemies = enemies.filter(enemy => {
+                drawEnemy(enemy);
+                const reachedEnd = moveEnemy(enemy);
+                if (reachedEnd) {
+                    updateCastleHealth(-10);
+                    return false;
+                }
+                if (enemy.health <= 0) {
+                    updateMoney(10);
+                    points += 10;
+                    updatePointsDisplay();
+                    return false;
+                }
+
+                // Check for collision with towers
+                towers.forEach(tower => {
+                    if (Math.abs(enemy.x - tower.x) < 15 && Math.abs(enemy.y - tower.y) < 15) {
+                        tower.health -= 1;
+                        enemy.health -= 5;
+                    }
+                });
+
+                return true;
+            });
+
+            // Remove destroyed towers
+            towers = towers.filter(tower => tower.health > 0);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Mouse event listeners
+        canvas.addEventListener('mousemove', (e) => {
+            handlePointerMove(e.clientX, e.clientY);
+        });
+
+        canvas.addEventListener('click', (e) => {
+            handlePointerClick(e.clientX, e.clientY);
+        });
+
+        // Touch event listeners
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Prevent scrolling
+            const touch = e.touches[0];
+            handlePointerMove(touch.clientX, touch.clientY);
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault(); // Prevent zooming
+            const touch = e.changedTouches[0];
+            handlePointerClick(touch.clientX, touch.clientY);
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (!gameOver && !isPaused && selectedTowerType && money >= towerTypes[selectedTowerType].cost) {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / (rect.width / canvas.width);
+                const y = (e.clientY - rect.top) / (rect.height / canvas.height);
+                if (x < castle.x - 30 && !isOnPath(x, y)) {
+                    const newTower = {
+                        x,
+                        y,
+                        health: 100,
+                        cooldown: 0,
+                        ...towerTypes[selectedTowerType]
+                    };
+                    towers.push(newTower);
+                    updateMoney(-newTower.cost);
+                    selectedTowerType = null;
+                    ghostTower = null;
+                }
+            }
+        });
+
+        startWaveBtn.addEventListener('click', () => {
+            if (!gameOver && !waveInProgress) {
+                waveInProgress = true;
+                startWaveBtn.disabled = true;
+
+                if (!isFirstWave) {
+                    currentWave++;
+                    updateWaveNumber();
+                    currentPath = getRandomPath();
+                    updateCastlePosition();
+                    removeTowers();
+                } else {
+                    isFirstWave = false;
+                }
+
+                countdown(3, () => {
+                    
+                    let enemiesSpawned = 0;
+                    const spawnInterval = setInterval(() => {
+                        if (gameOver) {
+                            clearInterval(spawnInterval);
+                            return;
+                        }
+                        spawnEnemy();
+                        enemiesSpawned++;
+                        if (enemiesSpawned >= 10) {
+                            clearInterval(spawnInterval);
+                            waveInProgress = false;
+                            startWaveBtn.disabled = false;
+                            updateTowerButtons();
+                        }
+                    }, 1000);
+                });
+            }
+        });
+
+
+        retryButton.addEventListener('click', restartGame);
+
+        function selectTowerType(type) {
+            selectedTowerType = type;
+            ghostTower = {
+                x: mouseX,
+                y: mouseY,
+                ...towerTypes[type]
+            };
+        }
+
+        basicTowerBtn.addEventListener('click', () => selectTowerType('basic'));
+        sniperTowerBtn.addEventListener('click', () => selectTowerType('sniper'));
+        rapidTowerBtn.addEventListener('click', () => selectTowerType('rapid'));
+
+        togglePauseBtn.addEventListener('click', togglePause);
+
+        initGame();
+        resizeCanvas();
+        gameLoop();
+
+    </script>
+</body>
+</html>
